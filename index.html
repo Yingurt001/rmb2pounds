@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RMB → £ 汇率监测 · 什么时候换英镑划算</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg1:#1b1033; --bg2:#3a1c5a; --card:rgba(255,255,255,.06);
+    --pink:#ff7eb3; --purple:#9d7bff; --green:#41e0a3; --yellow:#ffd166; --red:#ff6b6b;
+    --txt:#f4eeff; --sub:#b9aee0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;
+    background:linear-gradient(160deg,var(--bg1),var(--bg2));
+    color:var(--txt);min-height:100vh;padding:24px 16px 60px;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  header{text-align:center;margin-bottom:8px}
+  header h1{font-size:20px;font-weight:600;letter-spacing:.5px}
+  header p{color:var(--sub);font-size:13px;margin-top:4px}
+  .card{background:var(--card);border:1px solid rgba(255,255,255,.08);
+    border-radius:20px;padding:24px;margin-top:18px;backdrop-filter:blur(10px);
+    box-shadow:0 10px 40px rgba(0,0,0,.25)}
+  .hero{text-align:center}
+  .rate{font-size:56px;font-weight:700;line-height:1;
+    background:linear-gradient(90deg,var(--pink),var(--purple));
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .rate small{font-size:18px;color:var(--sub);-webkit-text-fill-color:var(--sub)}
+  .badge{display:inline-block;margin-top:14px;padding:8px 18px;border-radius:999px;
+    font-weight:600;font-size:15px}
+  .delta{margin-top:10px;color:var(--sub);font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  .stat{background:rgba(255,255,255,.05);border-radius:14px;padding:14px;text-align:center}
+  .stat .k{font-size:12px;color:var(--sub)}
+  .stat .v{font-size:20px;font-weight:600;margin-top:4px}
+  .score-wrap{margin-top:18px}
+  .score-bar{height:14px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:8px}
+  .score-fill{height:100%;border-radius:999px;transition:width .6s ease}
+  .row{display:flex;justify-content:space-between;align-items:center}
+  .target-box{margin-top:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .target-box label{font-size:14px;color:var(--sub)}
+  .target-box input{width:90px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
+    background:rgba(0,0,0,.2);color:var(--txt);font-size:16px;text-align:center}
+  .btn{padding:8px 14px;border-radius:10px;border:none;cursor:pointer;font-weight:600;
+    background:linear-gradient(90deg,var(--pink),var(--purple));color:#fff}
+  canvas{margin-top:6px}
+  footer{text-align:center;color:var(--sub);font-size:12px;margin-top:24px;line-height:1.7}
+  a{color:var(--pink)}
+  .loading{text-align:center;color:var(--sub);padding:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>💷 人民币 → 英镑 · 换汇时机</h1>
+    <p>越低越划算 · 数据来自 ECB（frankfurter.app）· 工作日更新</p>
+  </header>
+
+  <div class="card hero" id="hero">
+    <div class="loading">读取汇率中…</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><b>📈 近 30 天走势</b><span id="rangeLabel" style="color:var(--sub);font-size:12px"></span></div>
+    <canvas id="chart" height="180"></canvas>
+  </div>
+
+  <footer>
+    红线 = 你的目标价。跌到目标价以下就是出手的好时机。<br>
+    本页是网页版速览；<b>实时盯盘 + Apple Watch 提醒</b>由本地监测器负责（北京 7:00–23:00）。<br>
+    汇率无法预测，本工具只做「逢低买」信号，不构成投资建议。
+  </footer>
+</div>
+
+<script>
+const TARGET_KEY = 'rmb2p_target';
+let target = parseFloat(localStorage.getItem(TARGET_KEY)) || 9.03;
+let chart;
+
+function fmt(n,d=4){return Number(n).toFixed(d)}
+function dateStr(dt){return dt.toISOString().slice(0,10)}
+
+async function load(){
+  const today = new Date();
+  const past = new Date(); past.setDate(past.getDate()-32);
+  const histUrl = `https://api.frankfurter.dev/v1/${dateStr(past)}..${dateStr(today)}?from=GBP&to=CNY`;
+  let hist;
+  try{
+    hist = await (await fetch(histUrl)).json();
+  }catch(e){
+    document.getElementById('hero').innerHTML='<div class="loading">网络读取失败，稍后刷新</div>';
+    return;
+  }
+  const rows = Object.entries(hist.rates).map(([d,v])=>({d,v:v.CNY})).sort((a,b)=>a.d<b.d?-1:1);
+  const vals = rows.map(r=>r.v);
+  const price = vals[vals.length-1];
+  const prev = vals[vals.length-2] ?? price;
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const ma7 = vals.slice(-7).reduce((a,b)=>a+b,0)/Math.min(7,vals.length);
+  let score = Math.round((1-(price-lo)/((hi-lo)||1))*100);
+  score = Math.max(0,Math.min(100,score));
+
+  let verdict, color, badgeText;
+  if(price<=target){verdict='🟢 到目标价了，建议出手！';color='var(--green)';badgeText='该换了 💷';}
+  else if(score>=80){verdict='🟢 很划算，贴近近月低点';color='var(--green)';badgeText='划算';}
+  else if(score>=55){verdict='🟡 偏低，可再等等到目标价';color='var(--yellow)';badgeText='再等等';}
+  else{verdict='🔴 偏贵，不建议现在换';color='var(--red)';badgeText='偏贵';}
+
+  const diff = price-target;
+  const dayChg = price-prev;
+
+  document.getElementById('hero').innerHTML = `
+    <div class="rate">${fmt(price,4)} <small>元 / 英镑</small></div>
+    <div class="badge" style="background:${color};color:#10121f">${badgeText} · 划算度 ${score}/100</div>
+    <div class="delta">较前一日 ${dayChg>=0?'▲ +':'▼ '}${fmt(dayChg,4)} · ${verdict}</div>
+    <div class="score-wrap">
+      <div class="row" style="font-size:12px;color:var(--sub)"><span>贵</span><span>划算度</span><span>划算</span></div>
+      <div class="score-bar"><div class="score-fill" style="width:${score}%;background:${color}"></div></div>
+    </div>
+    <div class="grid">
+      <div class="stat"><div class="k">近30天最低</div><div class="v">${fmt(lo,3)}</div></div>
+      <div class="stat"><div class="k">7日均价</div><div class="v">${fmt(ma7,3)}</div></div>
+      <div class="stat"><div class="k">近30天最高</div><div class="v">${fmt(hi,3)}</div></div>
+    </div>
+    <div class="target-box">
+      <label>我的目标价 ≤</label>
+      <input id="targetInput" type="number" step="0.01" value="${target}">
+      <button class="btn" onclick="saveTarget()">保存</button>
+      <span style="color:var(--sub);font-size:13px">离目标还差 ${diff>0?fmt(diff,4):'已到达 ✅'}${diff>0?' 元':''}</span>
+    </div>`;
+
+  document.getElementById('rangeLabel').textContent = `${rows[0].d} ~ ${rows[rows.length-1].d}`;
+  drawChart(rows);
+}
+
+function drawChart(rows){
+  const ctx = document.getElementById('chart');
+  const labels = rows.map(r=>r.d.slice(5));
+  const data = rows.map(r=>r.v);
+  if(chart) chart.destroy();
+  chart = new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'GBP/CNY',data,borderColor:'#ff7eb3',borderWidth:2,
+       fill:true,tension:.3,pointRadius:0,
+       backgroundColor:(c)=>{const g=c.chart.ctx.createLinearGradient(0,0,0,180);
+         g.addColorStop(0,'rgba(157,123,255,.35)');g.addColorStop(1,'rgba(157,123,255,0)');return g;}},
+      {label:'目标价',data:data.map(()=>target),borderColor:'#41e0a3',
+       borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false}
+    ]},
+    options:{responsive:true,plugins:{legend:{labels:{color:'#b9aee0',boxWidth:12}}},
+      scales:{x:{ticks:{color:'#b9aee0',maxTicksLimit:8},grid:{display:false}},
+        y:{ticks:{color:'#b9aee0'},grid:{color:'rgba(255,255,255,.06)'}}}}
+  });
+}
+
+function saveTarget(){
+  const v = parseFloat(document.getElementById('targetInput').value);
+  if(!isNaN(v)){target=v;localStorage.setItem(TARGET_KEY,v);load();}
+}
+
+load();
+setInterval(load, 10*60*1000); // 每10分钟刷新
+</script>
+</body>
+</html>
