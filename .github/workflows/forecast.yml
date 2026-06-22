@@ -1,0 +1,41 @@
+name: daily-forecast
+
+on:
+  schedule:
+    # 每个工作日 16:30 UTC 跑（ECB 约 16:00 CET 发布当日参考汇率之后）
+    - cron: "30 16 * * 1-5"
+  workflow_dispatch:        # 也可手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r model/requirements.txt
+
+      - name: Run forecast engine
+        env:
+          FX_TARGET: "9.03"     # 云端模型用的目标价；想改就改这里
+        run: python model/forecast.py
+
+      - name: Commit predictions
+        run: |
+          git config user.name  "fx-bot"
+          git config user.email "fx-bot@users.noreply.github.com"
+          git add predictions.json backtest_report.md
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "chore: 每日预测更新 $(date -u +%F)"
+            git push
+          fi
